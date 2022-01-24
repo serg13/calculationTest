@@ -1,3 +1,10 @@
+/**
+ * Get indexed measurement data by race, gender, and type (adult/B/C)
+ * @param {string} race
+ * @param {string} gender
+ * @param {string} type
+ * @return {Object}
+ */
 function getDiagnosesData (race, gender, type) {
     var result = {};
     for (var key in measurement_reference_data) {
@@ -18,6 +25,398 @@ function getDiagnosesData (race, gender, type) {
 
     return result;
 }
+
+/**
+ * Get diagnosis text by type
+ * @param {Object} calculatedValues
+ * @param {Object} json_data
+ * @param {array} measurement_array
+ * @param {number[]} thresholds
+ * @param {string[]} deviationLabels
+ * @param {string[]} severityLabels
+ * @param {string[]} cssLabels
+ * @return {Object}
+ */
+function updateDiagnosisText2(
+    calculatedValues,
+    json_data,
+    measurement_array,
+    thresholds,
+    deviationLabels,
+    severityLabels,
+    cssLabels
+) {
+    var result_point = 0;
+
+    for (var i in measurement_array) {
+        // var nodes = json_data[measurement_array[i]].nodes;
+        // console.log(measurement_array[i]);
+
+        // replaces patient measurement value with precalculatedValue if exists
+        var itemCalculatedValue = null;
+        var key = measurement_array[i]["item"];
+        if (typeof (calculatedValues[key]) !== 'undefined') {
+            itemCalculatedValue = calculatedValues[key];
+        }
+
+        // if pre calculated value not exists - calculate it
+        if (itemCalculatedValue === null) {
+            itemCalculatedValue = calculate_measurement(json_data, measurement_array[i]["item"]);
+        }
+
+        // calculate difference between actual value and mean value, get standard deviation value and direction for measurement
+        var diff = itemCalculatedValue - json_data[measurement_array[i]["item"]].mean;
+        var sd = json_data[measurement_array[i]["item"]].sd;
+        // var direction = measurement_reference_data[measurement_array[i]].direction; //@todo why?
+        var direction = measurement_array[i]["direction"];
+
+        var measurementResultPoints = calculateResultPointsBySdDiff(diff, sd, direction);
+        result_point += measurementResultPoints;
+    }
+
+    return getStateByDeviationPointsAndThresholds(result_point, thresholds, deviationLabels, severityLabels, cssLabels);
+
+}
+
+/**
+ * Calculate points of deviation by diff between actual and mean values, standard deviation value and direction (direct or opposite)
+ * @param {number} diff diff between actual and mean values
+ * @param {number} sd standard deviation
+ * @param {boolean} direction true for direct and false for opposite
+ * @return {number} deviation points 0-3 from normal state to max deviation
+ */
+function calculateResultPointsBySdDiff(diff, sd, direction) {
+
+    var maxMultiplier = 3;
+    var directionKoeff = direction ? 1 : -1;
+    var diffKoeff = diff >= 0 ? 1 : -1;
+
+    var diffMultiplier = Math.floor((Math.abs(diff) / Math.abs(sd)));
+    diffMultiplier = Math.min(diffMultiplier, maxMultiplier);
+
+    return diffMultiplier * directionKoeff * diffKoeff;
+}
+
+/**
+ * Get the deviation label
+ * @param {number} deviationPoints deviation sum, calculated by measurement the current param is depends on
+ * @param {number[]} thresholds - to classify degree of deviation
+ * @param {string[]} deviationLabels - labels for deviation to lower values, normal state, deviation to upper values
+ * @param {string[]} severityLabels - labels for deviation severity [normal, mild, moderate, severe]
+ * @param {string[]} cssClasses - css classes by severity
+ * @return {Object} title and html classes to display the result
+ */
+function getStateByDeviationPointsAndThresholds(
+    deviationPoints,
+    thresholds,
+    deviationLabels,
+    severityLabels,
+    cssClasses
+) {
+    var directionToUpper = deviationPoints >= 0;
+    var deviationPointsAbs = Math.abs(deviationPoints);
+
+    var deviationLevel = thresholds.length + 1; //as default we set deviation level to max
+
+    for (var i = 0; i < thresholds.length; i++) {
+        if (deviationPointsAbs < thresholds[i]) {
+            deviationLevel = i;
+            break;
+        }
+    }
+
+    var resultStr = '';
+    if (deviationLevel === 0) {
+        resultStr = deviationLabels[1];
+    } else {
+        resultStr = directionToUpper ? deviationLabels[2] : deviationLabels[0];
+    }
+    var resultSeverity = severityLabels[deviationLevel];
+    var resultClass = cssClasses[deviationLevel];
+
+    return {
+        result_str: resultStr,
+        severity: resultSeverity,
+        class: resultClass,
+    }
+
+}
+
+
+function updateDiagnosisText(measurement_array, threshold_1, threshold_2, threshold_3, result_1, result_2, result_3) {
+    var result_point = 0;
+    for (var i in measurement_array) {
+
+        var nodes = measurement_reference_data[measurement_array[i]].nodes;
+        var diff = measurement_reference_data[measurement_array[i]].result(nodes[0], nodes[1], nodes[2], nodes[3], nodes[4], nodes[5], nodes[6], nodes[7], nodes[8], nodes[9], nodes[10], nodes[11], nodes[12], nodes[13], nodes[14], nodes[15]) - measurement_reference_data[measurement_array[i]].asian.male.adult.mean;
+
+        var sd = measurement_reference_data[measurement_array[i]].asian.male.adult.sd
+        var direction = measurement_reference_data[measurement_array[i]].direction;
+
+
+        if (diff > 3 * sd) {
+            if (direction) {
+                result_point += 3;
+            } else {
+                result_point += (-3);
+            }
+        } else if ((3 * sd) > (diff) && (diff) > (2 * sd)) {
+            if (direction) {
+                result_point += 2;
+            } else {
+                result_point += (-2);
+            }
+        } else if ((2 * sd) > (diff) && (diff) > (1 * sd)) {
+            if (direction) {
+                result_point += 1;
+            } else {
+                result_point += (-1);
+            }
+        } else if (((-1) * sd) > (diff) && (diff) > ((-2) * sd)) {
+            if (direction) {
+                result_point += (-1);
+            } else {
+                result_point += 1;
+            }
+        } else if (((-2) * sd) > (diff) && (diff) > ((-3) * sd)) {
+            if (direction) {
+                result_point += (-2);
+            } else {
+                result_point += 2;
+            }
+        } else if ((-3) * sd > diff) {
+            if (direction) {
+                result_point += (-3);
+            } else {
+                result_point += 3;
+            }
+        }
+
+    }
+
+    var upper_ref_1 = threshold_1, lower_ref_1 = (-threshold_1);
+    var upper_ref_2 = threshold_2, lower_ref_2 = (-threshold_2);
+    var upper_ref_3 = threshold_3, lower_ref_3 = (-threshold_3);
+    var result_str = "";
+    var severity = "";
+    var severity_class = "";
+
+    // console.log(result_point);
+
+    if (result_point >= upper_ref_3) {
+        // console.log("case 1");
+        result_str = result_1;
+        severity = "(severe)";
+        severity_class = "severe";
+
+    } else if (upper_ref_3 > result_point && result_point >= upper_ref_2) {
+        // console.log("case 2");
+        result_str = result_1;
+        severity = "(moderate)";
+        severity_class = "moderate";
+
+    } else if (upper_ref_2 > result_point && result_point >= upper_ref_1) {
+        // console.log("case 3");
+        result_str = result_1;
+        severity = "(mild)";
+        severity_class = "mild";
+
+    } else if (upper_ref_1 > result_point && result_point > lower_ref_1) {
+        // console.log("case 4");
+        result_str = result_2;
+        severity = "";
+        severity_class = "normal";
+
+    } else if (lower_ref_1 >= result_point && result_point > lower_ref_2) {
+        // console.log("case 5");
+        result_str = result_3;
+        severity = "(mild)";
+        severity_class = "mild";
+
+    } else if (lower_ref_2 >= result_point && result_point > lower_ref_3) {
+        // console.log("case 6");
+        result_str = result_3;
+        severity = "(moderate)";
+        severity_class = "moderate";
+
+    } else if (lower_ref_3 >= result_point) {
+        // console.log("case 7");
+        result_str = result_3;
+        severity = "(severe)";
+        severity_class = "severe";
+
+    } else {
+        // console.log("case 8");
+    }
+
+
+    return {"result_str": result_str, "severity": severity, "severity_class": severity_class};
+}
+
+
+function calculate_measurement(json_data, measurement_name) {
+    var item = json_data[measurement_name];
+    // console.log(measurement_name);
+    var nodes = item.nodes;
+    var m_type = item.m_type;
+    var measurement_1 = item.measurement_1;
+    var measurement_2 = item.measurement_2;
+    var measurement_3 = item.measurement_3;
+
+    // console.log(nodes);
+    // console.log(m_type);
+    // console.log(measurement_1)
+
+    // angle_AB_CD
+    // angle_AB_CD_unsigned
+    // angle_ABC
+    // distance_AB
+    // distance_A_BC
+    // distance_A_BC_signed
+    // distance_AB_horizontal
+    // distance_AB_vertical
+    // distance_A_to_B_vertical(Cy)
+    // distance_A_to_B_perp_CD
+    // distance_AB_along_CD
+    // distance_AB_perp_CD
+    // Result1+Result2
+    // Result1-Result2
+    // Result1+Result2+Result3
+    // Result1/Result2
+    // (Result1/Result2)*100
+
+    switch (m_type) {
+        case "angle_AB_CD":
+            return angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3])).toFixed(2);
+            break;
+        case "angle_AB_CD_unsigned":
+            if (angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3])).toFixed(2) < 0) {
+                return (360 + angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3]))).toFixed(2);
+            } else {
+                return angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3])).toFixed(2);
+            }
+            break;
+        case "(angle_AB_CD)-90":
+            return (angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3])) - 90).toFixed(2);
+            break;
+        case "angle_ABC":
+            return angle(point(nodes[0]), point(nodes[1]), point(nodes[2])).toFixed(2);
+            break;
+        case "distance_AB":
+            return (pointToPointDistance(point(nodes[0]).coordinates, point(nodes[1]).coordinates) * mm_px_ratio).toFixed(2);
+            break;
+        case "distance_A_BC":
+            return (pointLineDistance(point(nodes[0]).coordinates, point(nodes[1]).coordinates, point(nodes[2]).coordinates) * mm_px_ratio).toFixed(2);
+        case "distance_A_BC_signed":
+            return (pointToRickettsELine(point(nodes[1]), point(nodes[2]), point(nodes[0])) * mm_px_ratio).toFixed(2);
+        case "distance_AB_horizontal":
+            if ((point(nodes[1]).coordinates.x - point(nodes[0]).coordinates.x) < 0) {
+                return (-(point(nodes[1]).coordinates.x - point(nodes[0]).coordinates.x) * mm_px_ratio).toFixed(2);
+            } else {
+                return ((point(nodes[1]).coordinates.x - point(nodes[0]).coordinates.x) * mm_px_ratio).toFixed(2);
+            }
+        case "distance_AB_vertical":
+            if ((point(nodes[1]).coordinates.y - point(nodes[0]).coordinates.y) < 0) {
+                return (-(point(nodes[1]).coordinates.y - point(nodes[0]).coordinates.y) * mm_px_ratio).toFixed(2);
+            } else {
+                return ((point(nodes[1]).coordinates.y - point(nodes[0]).coordinates.y) * mm_px_ratio).toFixed(2);
+            }
+        case "distance_A_to_B_vertical(Cy)":
+            return ((point(nodes[0]).coordinates.x - point(nodes[1]).coordinates.x) * mm_px_ratio).toFixed(2);
+        // case "distance_AB_along_CD":
+        //     console.log("distance_AB_along_CD");
+        //     var cd_to_hor = angle_vectors({"coordinates":{"x":0,"y":0}},{"coordinates":{"x":100,"y":0}},point(nodes[3]),point(nodes[2]))
+        //     console.log(rotate(point(nodes[0]).coordinates, point('S').coordinates, cd_to_hor));
+        //     console.log(rotate(point(nodes[1]).coordinates, point('S').coordinates, cd_to_hor));
+        //     return((rotate(point(nodes[0]).coordinates, point('S').coordinates, cd_to_hor)[0]-rotate(point(nodes[1]).coordinates, point('S').coordinates, cd_to_hor)[0])*mm_px_ratio).toFixed(2);
+
+        case "Result1+Result2+Result3":
+            var result_1, result_2, result_3 = 0;
+
+            $.each(json_data, function (key, value) {
+
+                if (measurement_1 == key) {
+                    result_1 = Number(calculate_measurement(json_data, key));
+                } else if (measurement_2 == key) {
+                    result_2 = Number(calculate_measurement(json_data, key));
+                } else if (measurement_3 == key) {
+                    result_3 = Number(calculate_measurement(json_data, key));
+                }
+
+            });
+            // for(var i in json_data){
+            //   if(measurement_1 == json_data[i].item){
+            //     result_1 = Number(calculate_measurement(json_data, data[i]));
+            //   }else if(measurement_2 == data[i].item){
+            //     result_2 = Number(calculate_measurement(data, data[i]));
+            //   }else if(measurement_3 == data[i].item){
+            //     result_3 = Number(calculate_measurement(data, data[i]));
+            //   }
+            // }
+            // console.log("result:"+(result_1 + result_2 + result_3).toFixed(2));
+
+            return (result_1 + result_2 + result_3).toFixed(2);
+
+
+        case "distance_AB_along_CD":
+
+            var sp_point1 = getSpPoint(point(nodes[2]), point(nodes[3]), point(nodes[0]));  //U6Mesial
+            var sp_point2 = getSpPoint(point(nodes[2]), point(nodes[3]), point(nodes[1]));  //L6Mesial
+
+            if ((sp_point2.x - sp_point1.x) * (point(nodes[3]).coordinates.x - point(nodes[2]).coordinates.x) > 0) {
+
+                return (pointToPointDistance(sp_point1, sp_point2) * mm_px_ratio).toFixed(2);
+            } else {
+                return (-pointToPointDistance(sp_point1, sp_point2) * mm_px_ratio).toFixed(2);
+            }
+
+        case "distance_AB_perp_CD":
+
+            var dc_to_ab = angle_vectors(point(nodes[3]), point(nodes[2]), point(nodes[1]), point(nodes[0]));
+
+            var distance_AB = (pointToPointDistance(point(nodes[1]).coordinates, point(nodes[0]).coordinates));
+
+            var radians = (Math.PI / 180) * dc_to_ab,
+                cos = Math.cos(radians),
+                sin = Math.sin(radians);
+
+
+            return (distance_AB * sin * mm_px_ratio).toFixed(2);
+
+
+        case "distance_A_to_B_perp_CD":
+
+
+            var sp_point = getSpPoint(point(nodes[2]), point(nodes[3]), point(nodes[1]));
+
+            if (sp_point.x - point(nodes[1]).coordinates.x != 0) {
+                var slope = (sp_point.y - point(nodes[1]).coordinates.y) / (sp_point.x - point(nodes[1]).coordinates.x)
+                var y = point("Me").coordinates.y;
+                var x = (y - point(nodes[1]).coordinates.y) / slope + point(nodes[1]).coordinates.x;
+                var E = {"coordinates": {"x": x, "y": y}};
+            } else {
+                var E = {"coordinates": {"x": point(nodes[1]).coordinates.x, "y": point("Me").coordinates.y}};
+            }
+
+            if ((point(nodes[1]).coordinates.x - x) == 0) {
+                return ((point(nodes[0]).coordinates.x - x) * mm_px_ratio).toFixed(2);
+
+            } else if ((point(nodes[1]).coordinates.x - x) > 0) {
+                return (pointToRickettsELine(point(nodes[1]), E, point(nodes[0])) * mm_px_ratio).toFixed(2);
+            } else {
+                return (-pointToRickettsELine(point(nodes[1]), E, point(nodes[0])) * mm_px_ratio).toFixed(2);
+            }
+
+
+        default:
+            console.log("measurement_calculate_default");
+
+    }
+
+
+}
+
+
 
 function diagnose(race, gender, type) {
     // var sk_mx_mn_ap = 0;
@@ -377,434 +776,3 @@ function diagnose(race, gender, type) {
 
 }
 
-
-function updateDiagnosisText2(calculatedValues, measurement_array, json_data, threshold_1, threshold_2, threshold_3, result_1, result_2, result_3) {
-    var result_point = 0;
-
-    for (var i in measurement_array) {
-        // var nodes = json_data[measurement_array[i]].nodes;
-        // console.log(measurement_array[i]);
-
-        // replaces patient measurement value with precalculatedValue if exists
-        var itemCalculatedValue = null;
-        var key = measurement_array[i]["item"];
-        if (typeof(calculatedValues[key]) !== 'undefined') {
-            itemCalculatedValue = calculatedValues[key];
-        }
-
-        // if pre calculated value not exists - calculate it
-        if (itemCalculatedValue === null) {
-            itemCalculatedValue = calculate_measurement(json_data, measurement_array[i]["item"]);
-        }
-
-        // calculate difference between actual value and mean value, get standard deviation value and direction for measurement
-        var diff = itemCalculatedValue - json_data[measurement_array[i]["item"]].mean;
-        var sd = json_data[measurement_array[i]["item"]].sd;
-        // var direction = measurement_reference_data[measurement_array[i]].direction; //@todo why?
-        var direction = measurement_array[i]["direction"];
-
-        var measurementResultPoints = calculateResultPointsBySdDiff(diff, sd, direction);
-        result_point += measurementResultPoints;
-
-        // if (diff > 3 * sd) {
-        //     if (direction) {
-        //         result_point += 3;
-        //     } else {
-        //         result_point += (-3);
-        //     }
-        // } else if ((3 * sd) > (diff) && (diff) > (2 * sd)) {
-        //     if (direction) {
-        //         result_point += 2;
-        //     } else {
-        //         result_point += (-2);
-        //     }
-        // } else if ((2 * sd) > (diff) && (diff) > (1 * sd)) {
-        //     if (direction) {
-        //         result_point += 1;
-        //     } else {
-        //         result_point += (-1);
-        //     }
-        // } else if (((-1) * sd) > (diff) && (diff) > ((-2) * sd)) {
-        //     if (direction) {
-        //         result_point += (-1);
-        //     } else {
-        //         result_point += 1;
-        //     }
-        // } else if (((-2) * sd) > (diff) && (diff) > ((-3) * sd)) {
-        //     if (direction) {
-        //         result_point += (-2);
-        //     } else {
-        //         result_point += 2;
-        //     }
-        // } else if ((-3) * sd > diff) {
-        //     if (direction) {
-        //         result_point += (-3);
-        //     } else {
-        //         result_point += 3;
-        //     }
-        // }
-
-    }
-
-
-    // var upper_ref_1 = threshold_1, lower_ref_1 = (-threshold_1);
-    // var upper_ref_2 = threshold_2, lower_ref_2 = (-threshold_2);
-    // var upper_ref_3 = threshold_3, lower_ref_3 = (-threshold_3);
-    // var result_str = "";
-    // var severity = "";
-    // var severity_class = "";
-    //
-    // // console.log(result_point);
-    //
-    // if (result_point >= upper_ref_3) {
-    //     // console.log("case 1");
-    //     result_str = result_1;
-    //     severity = "(severe)";
-    //     severity_class = "severe";
-    //
-    // } else if (upper_ref_3 > result_point && result_point >= upper_ref_2) {
-    //     // console.log("case 2");
-    //     result_str = result_1;
-    //     severity = "(moderate)";
-    //     severity_class = "moderate";
-    //
-    // } else if (upper_ref_2 > result_point && result_point >= upper_ref_1) {
-    //     // console.log("case 3");
-    //     result_str = result_1;
-    //     severity = "(mild)";
-    //     severity_class = "mild";
-    //
-    // } else if (upper_ref_1 > result_point && result_point > lower_ref_1) {
-    //     // console.log("case 4");
-    //     result_str = result_2;
-    //     severity = "";
-    //     severity_class = "normal";
-    //
-    // } else if (lower_ref_1 >= result_point && result_point > lower_ref_2) {
-    //     // console.log("case 5");
-    //     result_str = result_3;
-    //     severity = "(mild)";
-    //     severity_class = "mild";
-    //
-    // } else if (lower_ref_2 >= result_point && result_point > lower_ref_3) {
-    //     // console.log("case 6");
-    //     result_str = result_3;
-    //     severity = "(moderate)";
-    //     severity_class = "moderate";
-    //
-    // } else if (lower_ref_3 >= result_point) {
-    //     // console.log("case 7");
-    //     result_str = result_3;
-    //     severity = "(severe)";
-    //     severity_class = "severe";
-    //
-    // } else {
-    //     // console.log("case 8");
-    // }
-
-    var stateResult = getStateByDeviationPointsAndThresholds(result_point, thresholds);
-    console.log('result', stateResult);
-
-    // var result = {"result_str": result_str, "severity": severity, "severity_class": severity_class};
-    // console.log('result', result);
-    // return result;
-
-}
-
-/**
- * Calculate points of deviation by diff between actual and mean values, standard deviation value and direction (direct or opposite)
- * @param {number} diff
- * @param {number} sd
- * @param {boolean} direction
- * @return {number}
- */
-function calculateResultPointsBySdDiff(diff, sd, direction) {
-
-    var maxMultiplier = 3;
-    var directionKoeff = direction ? 1 : -1;
-    var diffKoeff = diff >= 0 ? 1 : -1;
-
-    var diffMultiplier = Math.floor((Math.abs(diff) / Math.abs(sd)));
-    diffMultiplier = Math.min(diffMultiplier, maxMultiplier);
-
-    return diffMultiplier * directionKoeff * diffKoeff;
-}
-
-function getStateByDeviationPointsAndThresholds(deviationPoints, thresholds) {
-
-}
-
-
-function updateDiagnosisText(measurement_array, threshold_1, threshold_2, threshold_3, result_1, result_2, result_3) {
-    var result_point = 0;
-    for (var i in measurement_array) {
-
-        var nodes = measurement_reference_data[measurement_array[i]].nodes;
-        var diff = measurement_reference_data[measurement_array[i]].result(nodes[0], nodes[1], nodes[2], nodes[3], nodes[4], nodes[5], nodes[6], nodes[7], nodes[8], nodes[9], nodes[10], nodes[11], nodes[12], nodes[13], nodes[14], nodes[15]) - measurement_reference_data[measurement_array[i]].asian.male.adult.mean;
-
-        var sd = measurement_reference_data[measurement_array[i]].asian.male.adult.sd
-        var direction = measurement_reference_data[measurement_array[i]].direction;
-
-
-        if (diff > 3 * sd) {
-            if (direction) {
-                result_point += 3;
-            } else {
-                result_point += (-3);
-            }
-        } else if ((3 * sd) > (diff) && (diff) > (2 * sd)) {
-            if (direction) {
-                result_point += 2;
-            } else {
-                result_point += (-2);
-            }
-        } else if ((2 * sd) > (diff) && (diff) > (1 * sd)) {
-            if (direction) {
-                result_point += 1;
-            } else {
-                result_point += (-1);
-            }
-        } else if (((-1) * sd) > (diff) && (diff) > ((-2) * sd)) {
-            if (direction) {
-                result_point += (-1);
-            } else {
-                result_point += 1;
-            }
-        } else if (((-2) * sd) > (diff) && (diff) > ((-3) * sd)) {
-            if (direction) {
-                result_point += (-2);
-            } else {
-                result_point += 2;
-            }
-        } else if ((-3) * sd > diff) {
-            if (direction) {
-                result_point += (-3);
-            } else {
-                result_point += 3;
-            }
-        }
-
-    }
-
-    var upper_ref_1 = threshold_1, lower_ref_1 = (-threshold_1);
-    var upper_ref_2 = threshold_2, lower_ref_2 = (-threshold_2);
-    var upper_ref_3 = threshold_3, lower_ref_3 = (-threshold_3);
-    var result_str = "";
-    var severity = "";
-    var severity_class = "";
-
-    // console.log(result_point);
-
-    if (result_point >= upper_ref_3) {
-        // console.log("case 1");
-        result_str = result_1;
-        severity = "(severe)";
-        severity_class = "severe";
-
-    } else if (upper_ref_3 > result_point && result_point >= upper_ref_2) {
-        // console.log("case 2");
-        result_str = result_1;
-        severity = "(moderate)";
-        severity_class = "moderate";
-
-    } else if (upper_ref_2 > result_point && result_point >= upper_ref_1) {
-        // console.log("case 3");
-        result_str = result_1;
-        severity = "(mild)";
-        severity_class = "mild";
-
-    } else if (upper_ref_1 > result_point && result_point > lower_ref_1) {
-        // console.log("case 4");
-        result_str = result_2;
-        severity = "";
-        severity_class = "normal";
-
-    } else if (lower_ref_1 >= result_point && result_point > lower_ref_2) {
-        // console.log("case 5");
-        result_str = result_3;
-        severity = "(mild)";
-        severity_class = "mild";
-
-    } else if (lower_ref_2 >= result_point && result_point > lower_ref_3) {
-        // console.log("case 6");
-        result_str = result_3;
-        severity = "(moderate)";
-        severity_class = "moderate";
-
-    } else if (lower_ref_3 >= result_point) {
-        // console.log("case 7");
-        result_str = result_3;
-        severity = "(severe)";
-        severity_class = "severe";
-
-    } else {
-        // console.log("case 8");
-    }
-
-
-    return {"result_str": result_str, "severity": severity, "severity_class": severity_class};
-}
-
-
-function calculate_measurement(json_data, measurement_name) {
-    var item = json_data[measurement_name];
-    // console.log(measurement_name);
-    var nodes = item.nodes;
-    var m_type = item.m_type;
-    var measurement_1 = item.measurement_1;
-    var measurement_2 = item.measurement_2;
-    var measurement_3 = item.measurement_3;
-
-    // console.log(nodes);
-    // console.log(m_type);
-    // console.log(measurement_1)
-
-    // angle_AB_CD
-    // angle_AB_CD_unsigned
-    // angle_ABC
-    // distance_AB
-    // distance_A_BC
-    // distance_A_BC_signed
-    // distance_AB_horizontal
-    // distance_AB_vertical
-    // distance_A_to_B_vertical(Cy)
-    // distance_A_to_B_perp_CD
-    // distance_AB_along_CD
-    // distance_AB_perp_CD
-    // Result1+Result2
-    // Result1-Result2
-    // Result1+Result2+Result3
-    // Result1/Result2
-    // (Result1/Result2)*100
-
-    switch (m_type) {
-        case "angle_AB_CD":
-            return angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3])).toFixed(2);
-            break;
-        case "angle_AB_CD_unsigned":
-            if (angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3])).toFixed(2) < 0) {
-                return (360 + angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3]))).toFixed(2);
-            } else {
-                return angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3])).toFixed(2);
-            }
-            break;
-        case "(angle_AB_CD)-90":
-            return (angle_vectors(point(nodes[0]), point(nodes[1]), point(nodes[2]), point(nodes[3])) - 90).toFixed(2);
-            break;
-        case "angle_ABC":
-            return angle(point(nodes[0]), point(nodes[1]), point(nodes[2])).toFixed(2);
-            break;
-        case "distance_AB":
-            return (pointToPointDistance(point(nodes[0]).coordinates, point(nodes[1]).coordinates) * mm_px_ratio).toFixed(2);
-            break;
-        case "distance_A_BC":
-            return (pointLineDistance(point(nodes[0]).coordinates, point(nodes[1]).coordinates, point(nodes[2]).coordinates) * mm_px_ratio).toFixed(2);
-        case "distance_A_BC_signed":
-            return (pointToRickettsELine(point(nodes[1]), point(nodes[2]), point(nodes[0])) * mm_px_ratio).toFixed(2);
-        case "distance_AB_horizontal":
-            if ((point(nodes[1]).coordinates.x - point(nodes[0]).coordinates.x) < 0) {
-                return (-(point(nodes[1]).coordinates.x - point(nodes[0]).coordinates.x) * mm_px_ratio).toFixed(2);
-            } else {
-                return ((point(nodes[1]).coordinates.x - point(nodes[0]).coordinates.x) * mm_px_ratio).toFixed(2);
-            }
-        case "distance_AB_vertical":
-            if ((point(nodes[1]).coordinates.y - point(nodes[0]).coordinates.y) < 0) {
-                return (-(point(nodes[1]).coordinates.y - point(nodes[0]).coordinates.y) * mm_px_ratio).toFixed(2);
-            } else {
-                return ((point(nodes[1]).coordinates.y - point(nodes[0]).coordinates.y) * mm_px_ratio).toFixed(2);
-            }
-        case "distance_A_to_B_vertical(Cy)":
-            return ((point(nodes[0]).coordinates.x - point(nodes[1]).coordinates.x) * mm_px_ratio).toFixed(2);
-        // case "distance_AB_along_CD":
-        //     console.log("distance_AB_along_CD");
-        //     var cd_to_hor = angle_vectors({"coordinates":{"x":0,"y":0}},{"coordinates":{"x":100,"y":0}},point(nodes[3]),point(nodes[2]))
-        //     console.log(rotate(point(nodes[0]).coordinates, point('S').coordinates, cd_to_hor));
-        //     console.log(rotate(point(nodes[1]).coordinates, point('S').coordinates, cd_to_hor));
-        //     return((rotate(point(nodes[0]).coordinates, point('S').coordinates, cd_to_hor)[0]-rotate(point(nodes[1]).coordinates, point('S').coordinates, cd_to_hor)[0])*mm_px_ratio).toFixed(2);
-
-        case "Result1+Result2+Result3":
-            var result_1, result_2, result_3 = 0;
-
-            $.each(json_data, function (key, value) {
-
-                if (measurement_1 == key) {
-                    result_1 = Number(calculate_measurement(json_data, key));
-                } else if (measurement_2 == key) {
-                    result_2 = Number(calculate_measurement(json_data, key));
-                } else if (measurement_3 == key) {
-                    result_3 = Number(calculate_measurement(json_data, key));
-                }
-
-            });
-            // for(var i in json_data){
-            //   if(measurement_1 == json_data[i].item){
-            //     result_1 = Number(calculate_measurement(json_data, data[i]));
-            //   }else if(measurement_2 == data[i].item){
-            //     result_2 = Number(calculate_measurement(data, data[i]));
-            //   }else if(measurement_3 == data[i].item){
-            //     result_3 = Number(calculate_measurement(data, data[i]));
-            //   }
-            // }
-            // console.log("result:"+(result_1 + result_2 + result_3).toFixed(2));
-
-            return (result_1 + result_2 + result_3).toFixed(2);
-
-
-        case "distance_AB_along_CD":
-
-            var sp_point1 = getSpPoint(point(nodes[2]), point(nodes[3]), point(nodes[0]));  //U6Mesial
-            var sp_point2 = getSpPoint(point(nodes[2]), point(nodes[3]), point(nodes[1]));  //L6Mesial
-
-            if ((sp_point2.x - sp_point1.x) * (point(nodes[3]).coordinates.x - point(nodes[2]).coordinates.x) > 0) {
-
-                return (pointToPointDistance(sp_point1, sp_point2) * mm_px_ratio).toFixed(2);
-            } else {
-                return (-pointToPointDistance(sp_point1, sp_point2) * mm_px_ratio).toFixed(2);
-            }
-
-        case "distance_AB_perp_CD":
-
-            var dc_to_ab = angle_vectors(point(nodes[3]), point(nodes[2]), point(nodes[1]), point(nodes[0]));
-
-            var distance_AB = (pointToPointDistance(point(nodes[1]).coordinates, point(nodes[0]).coordinates));
-
-            var radians = (Math.PI / 180) * dc_to_ab,
-                cos = Math.cos(radians),
-                sin = Math.sin(radians);
-
-
-            return (distance_AB * sin * mm_px_ratio).toFixed(2);
-
-
-        case "distance_A_to_B_perp_CD":
-
-
-            var sp_point = getSpPoint(point(nodes[2]), point(nodes[3]), point(nodes[1]));
-
-            if (sp_point.x - point(nodes[1]).coordinates.x != 0) {
-                var slope = (sp_point.y - point(nodes[1]).coordinates.y) / (sp_point.x - point(nodes[1]).coordinates.x)
-                var y = point("Me").coordinates.y;
-                var x = (y - point(nodes[1]).coordinates.y) / slope + point(nodes[1]).coordinates.x;
-                var E = {"coordinates": {"x": x, "y": y}};
-            } else {
-                var E = {"coordinates": {"x": point(nodes[1]).coordinates.x, "y": point("Me").coordinates.y}};
-            }
-
-            if ((point(nodes[1]).coordinates.x - x) == 0) {
-                return ((point(nodes[0]).coordinates.x - x) * mm_px_ratio).toFixed(2);
-
-            } else if ((point(nodes[1]).coordinates.x - x) > 0) {
-                return (pointToRickettsELine(point(nodes[1]), E, point(nodes[0])) * mm_px_ratio).toFixed(2);
-            } else {
-                return (-pointToRickettsELine(point(nodes[1]), E, point(nodes[0])) * mm_px_ratio).toFixed(2);
-            }
-
-
-        default:
-            console.log("measurement_calculate_default");
-
-    }
-
-
-}
-		
